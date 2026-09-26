@@ -1,0 +1,20 @@
+# Raw challenge data (large; provided separately, not code)
+dataset/
+
+# Intermediate caches produced by prep.py / blocking.py (parquet, multi-GB)
+work/
+
+# Submission outputs (matching_results.tsv, candidate_pairs.tsv) - regenerate
+# via code/business_entity_resolution/src/run_all.py, upload separately to
+# the leaderboard / final zip rather than committing here (candidate_pairs.tsv
+# alone exceeds GitHub's 100MB per-file limit on the full test set).
+output/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
