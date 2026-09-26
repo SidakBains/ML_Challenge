@@ -1,0 +1,8 @@
+dataset/
+__pycache__/
+*.pyc
+.DS_Store
+output/
+models/
+student_resource/__MACOSX/
+student_resource/.DS_Store

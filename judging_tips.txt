@@ -1,0 +1,10 @@
+JUDGING & TIPS
+
+Scored on macro F₀.₅, precision-weighted
+
+F₀.₅ = (1.25 × Precision × Recall) / (0.25 × Precision + Recall)
+
+• A false merge costs about twice as much as a miss, so when unsure, do not merge.
+• Singletons are Source 1 entities with no match in Source 2 or 3. Predict an empty list for them and you earn a full 1.0; predict any match and you score 0.
+• Blocking sets your recall ceiling, so invest there first. You cannot match a record you never consider.
+• Account for region-specific patterns in both names and addresses.
