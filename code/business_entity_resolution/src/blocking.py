@@ -127,7 +127,7 @@ def block_country_v1(S, Q, k):
     return c
 
 
-def block_country_v2(S, Q, ks):
+def block_country_v2(S, Q, ks, emit=None):
     cm = ChannelModel(S, CHANNELS["v2"])
     Ms = {name: cm.space(cm.S, chans) for name, chans in SPACES.items()}
     MsT = {name: m.T.tocsr() for name, m in Ms.items()}
@@ -156,11 +156,14 @@ def block_country_v2(S, Q, ks):
                           "score": cos["comb"][order], "name_cos": cos["name"][order],
                           "addr_cos": cos["addr"][order], "found": found[order]})
         c["rank"] = c.groupby("q").cumcount().astype(np.int16)
-        parts.append(c)
+        if emit:
+            emit(c)
+        else:
+            parts.append(c)
         del Mq
         print(f"    chunk {start:,}: transform {tt[0]:.0f}s comb {tt[1]:.0f}s name {tt[2]:.0f}s "
               f"addr {tt[3]:.0f}s total {time.time() - t:.0f}s", flush=True)
-    return pd.concat(parts, ignore_index=True)
+    return pd.concat(parts, ignore_index=True) if parts else None
 
 
 def cands_path(split, mode, country):
@@ -193,15 +196,36 @@ def run(split, mode, k):
             print(f"[{country}] skipped (s1={len(s_idx)}, q={len(q_idx)})")
             continue
         S, Q = s1.iloc[s_idx], q.iloc[q_idx]
-        c = block_country_v1(S, Q, k) if mode == "v1" else block_country_v2(S, Q, K_V2)
-        c.insert(0, "q_row", q_idx[c.pop("q").values].astype(np.int32))
-        c.insert(1, "s1_row", s_idx[c.pop("s").values].astype(np.int32))
-        c.to_parquet(out, index=False)
-        print(f"[{country}] s1={len(s_idx):,} q={len(q_idx):,} pairs={len(c):,} "
-              f"({len(c) / len(q_idx):.1f}/query) in {time.time() - t:.0f}s", flush=True)
-        del c
+        def remap(c):
+            c.insert(0, "q_row", q_idx[c.pop("q").values].astype(np.int32))
+            c.insert(1, "s1_row", s_idx[c.pop("s").values].astype(np.int32))
+            return c
+
+        if mode == "v1":
+            c = remap(block_country_v1(S, Q, k))
+            c.to_parquet(out, index=False)
+            n_pairs = len(c)
+            del c
+        else:
+            import pyarrow as pa, pyarrow.parquet as pq
+            tmp = out.with_suffix(".parquet.tmp")
+            writer, n_pairs = None, 0
+
+            def emit(c):
+                nonlocal writer, n_pairs
+                tbl = pa.Table.from_pandas(remap(c), preserve_index=False)
+                if writer is None:
+                    writer = pq.ParquetWriter(tmp, tbl.schema)
+                writer.write_table(tbl)
+                n_pairs += len(c)
+
+            block_country_v2(S, Q, K_V2, emit=emit)
+            writer.close()
+            tmp.replace(out)  # only appears under its real name once complete
+        print(f"[{country}] s1={len(s_idx):,} q={len(q_idx):,} pairs={n_pairs:,} "
+              f"({n_pairs / len(q_idx):.1f}/query) in {time.time() - t:.0f}s", flush=True)
     if split == "train":
-        report_recall(load_cands(split, mode), s1, q)
+        report_recall(split, mode, s1, q)
     print(f"done in {time.time() - t0:.0f}s", flush=True)
 
 
@@ -218,20 +242,36 @@ def load_truth(s1, q):
     return truth
 
 
-def report_recall(cand, s1, q):
+def report_recall(split, mode, s1, q):
     truth = load_truth(s1, q)
     np.save(config.WORK_DIR / "train_truth.npy", truth)
     n_pos = int((truth >= 0).sum())
-    is_hit = truth[cand.q_row.values] == cand.s1_row.values
-    hit = cand[is_hit]
-    print(f"true pairs: {n_pos:,}  candidates/query: {len(cand) / len(q):.1f}")
-    print(f"  recall (all candidates): {len(hit) / n_pos:.4f}")
-    for kk in (1, 2, 3, 5, 10, 15, 20, 30):
-        if kk <= cand["rank"].max() + 1:
-            print(f"  recall@{kk}: {(hit['rank'] < kk).sum() / n_pos:.4f}")
-    if "found" in cand:
+    ks = (1, 2, 3, 5, 10, 15, 20, 30)
+    n_cand = n_hit = 0
+    at_k = dict.fromkeys(ks, 0)
+    via = {1: 0, 2: 0, 4: 0}
+    max_rank, has_found = 0, False
+    for f in sorted(config.WORK_DIR.glob(f"{split}_{mode}_cands_*.parquet")):
+        cand = pd.read_parquet(f)
+        n_cand += len(cand)
+        max_rank = max(max_rank, int(cand["rank"].max()))
+        hit = cand[truth[cand.q_row.values] == cand.s1_row.values]
+        n_hit += len(hit)
+        for kk in ks:
+            at_k[kk] += int((hit["rank"] < kk).sum())
+        if "found" in hit:
+            has_found = True
+            for b in via:
+                via[b] += int(((hit.found & b) > 0).sum())
+        del cand, hit
+    print(f"true pairs: {n_pos:,}  candidates/query: {n_cand / len(q):.1f}")
+    print(f"  recall (all candidates): {n_hit / n_pos:.4f}")
+    for kk in ks:
+        if kk <= max_rank + 1:
+            print(f"  recall@{kk}: {at_k[kk] / n_pos:.4f}")
+    if has_found:
         for b, name in ((1, "comb"), (2, "name"), (4, "addr")):
-            print(f"  recall via {name}: {((hit.found & b) > 0).sum() / n_pos:.4f}")
+            print(f"  recall via {name}: {via[b] / n_pos:.4f}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,244 @@
+Here is every result from the runs in this conversation, grouped by run. All F0.5, precision and recall figures are on held-out S1 entities, using the exact challenge metric (per-entity F0.5, macro-averaged). I've marked the few figures that come from earlier in the session and weren't re-displayed.
+
+## 1. Data sizes
+
+| | S1 records | Queries |
+|---|---|---|
+| Train, total | 2,206,821 | 10,320,219 |
+| Train, India | 883,188 | 4,133,346 |
+| Train, US | 1,323,633 | 6,186,873 |
+| Test, total | 1,732,544 | 9,969,589 |
+| Test, France / India / US | 259,452 / 809,986 / 663,106 | 1,434,993 / 4,717,565 / 3,817,031 |
+
+## 2. v1 (baseline)
+
+**Blocking (v1, top-k = 20 on train, top-10 used for the model):** train recall@20 ≈ 0.956 (from earlier in the session, not re-shown).
+
+**Test blocking (v1), 1,754s total:**
+
+| Country | Pairs | Per query | Time |
+|---|---|---|---|
+| France | 14,328,277 | 10.0 | 31s |
+| India | 46,969,449 | 10.0 | 1,567s |
+| US | 38,122,320 | 10.0 | 155s |
+
+**Model training log:** 102,912,059 candidates (rank < 10); 600,000 training queries → 5,982,816 pairs; eval 4,217,089 pairs (422,213 queries); 42 features; XGBoost best round **702**; total 219s.
+
+**Threshold sweep (30,000 held-out entities):**
+
+| t | F0.5 | Precision | Recall | Singleton acc. |
+|---|---|---|---|---|
+| 0.25 | 0.9517 | 0.9724 | 0.9287 | 0.9021 |
+| 0.35 | 0.9558 | 0.9794 | 0.9246 | 0.9259 |
+| 0.45 | 0.9580 | 0.9841 | 0.9203 | 0.9425 |
+| 0.55 | 0.9594 | 0.9880 | 0.9158 | 0.9565 |
+| 0.65 | 0.9593 | 0.9908 | 0.9104 | 0.9663 |
+| 0.75 | 0.9583 | 0.9933 | 0.9033 | 0.9761 |
+| 0.85 | 0.9553 | 0.9956 | 0.8923 | 0.9835 |
+| 0.95 | 0.9453 | 0.9983 | 0.8651 | 0.9957 |
+
+**Best: t = 0.60 → F0.5 = 0.9594, precision 0.9895, recall 0.9131, singleton accuracy 0.9614.** Blocking ceiling F0.5 (rank < 10) on eval: 0.9795.
+
+**Top features by gain:** `n_x_a` 3669, `margin` 1204, `a_tset` 377, `num_cont_s1` 259, `num_jac` 109.
+
+**Prediction on test:** 99,420,046 pairs scored (694s); 5,641,045 of 9,947,327 queries assigned at t = 0.6; total 784s. The submission files are in `output/`. The leaderboard score is not known to me.
+
+**Worked trace (one S1 entity, 6 candidates):** the 3 true matches got probabilities 0.9999, 0.9993 and 0.9871. The 3 distractors got 0.0000.
+
+## 3. v2 blocking (train)
+
+| Country | Pairs | Per query | Time | File size |
+|---|---|---|---|---|
+| India | 69,984,976 | 16.9 | 580s | 1.02 GB |
+| US | 103,079,692 | 16.7 | 1,142s | 1.54 GB |
+
+The first US attempt crashed with an out-of-memory error at the final concat. I fixed it by streaming chunks to the file. Search sizes: combined top 10, name top 6, address top 6.
+
+**Recall (7,638,365 true pairs, 16.8 candidates per query):**
+
+| | Recall |
+|---|---|
+| All candidates | 0.9825 |
+| @1 / @2 / @3 | 0.9456 / 0.9608 / 0.9671 |
+| @5 / @10 / @15 / @20 | 0.9733 / 0.9792 / 0.9821 / 0.9825 |
+| Via combined search | 0.9792 |
+| Via name-only search | 0.6510 |
+| Via address-only search | 0.8885 |
+
+## 4. v2 model (600k queries, same protocol as v1)
+
+103,174,350 candidates (rank < 10); 5,998,136 training pairs; 4,174,172 eval pairs (417,469 queries); 45 features; positive rate 0.072 / 0.073; XGBoost best round **954**; total 268s.
+
+| t | F0.5 | Precision | Recall | Singleton acc. |
+|---|---|---|---|---|
+| 0.05 | 0.9351 | 0.9341 | 0.9683 | 0.7931 |
+| 0.15 | 0.9550 | 0.9600 | 0.9641 | 0.8770 |
+| 0.25 | 0.9622 | 0.9706 | 0.9598 | 0.9082 |
+| 0.35 | 0.9665 | 0.9776 | 0.9557 | 0.9259 |
+| 0.45 | 0.9689 | 0.9827 | 0.9509 | 0.9364 |
+| 0.55 | 0.9704 | 0.9869 | 0.9459 | 0.9492 |
+| 0.65 | 0.9709 | 0.9906 | 0.9398 | 0.9676 |
+| 0.75 | 0.9704 | 0.9932 | 0.9330 | 0.9767 |
+| 0.85 | 0.9685 | 0.9957 | 0.9235 | 0.9865 |
+| 0.95 | 0.9593 | 0.9981 | 0.8976 | 0.9939 |
+
+**Best: t = 0.70 → F0.5 = 0.9709, precision 0.9921, recall 0.9367, singleton accuracy 0.9737.** Blocking ceiling F0.5: 0.9931.
+
+**Top features by gain:** `margin` 2126, `rank` 1309, `gap_top1` 523, `num_jac` 273, `n_x_a` 142.
+
+| | v1 | v2 |
+|---|---|---|
+| F0.5 | 0.9594 | 0.9709 |
+| Precision | 0.9895 | 0.9921 |
+| Recall | 0.9131 | 0.9367 |
+| Singleton acc. | 0.9614 | 0.9737 |
+| Threshold | 0.60 | 0.70 |
+| XGBoost rounds | 702 | 954 |
+
+## 5. Cascade study (fixed split, 1M-query samples A and B)
+
+**Setup:** 30,000 eval entities (15,000 TUNE, 15,000 REPORT), 417,469 eval queries. A and B: 1,000,000 queries each (~10M pairs each). Feature pairs: A 9,997,193, B 9,997,510, eval 4,174,172.
+
+**Stage 1 (trained on A):** 9,497,350 training pairs, 499,843 dev pairs, best round 1008, dev logloss 0.00846.
+
+| | τ₁ | F0.5 | P | R |
+|---|---|---|---|---|
+| TUNE | 0.61 | 0.9731 | 0.9906 | 0.9447 |
+| REPORT | 0.61 | 0.9712 | 0.9894 | 0.9433 |
+
+**Best-case (oracle) gain on TUNE if stage 2 were perfect in the band: maximum +0.0186.**
+
+Oracle gain by L (rows) and U (columns):
+
+| L \ U | 0.80 | 0.90 | 0.95 | 0.98 | 0.99 | 0.995 |
+|---|---|---|---|---|---|---|
+| 0.02 | 0.0149 | 0.0164 | 0.0172 | 0.0180 | 0.0184 | 0.0186 |
+| 0.05 | 0.0143 | 0.0158 | 0.0166 | 0.0173 | 0.0177 | 0.0179 |
+| 0.10 | 0.0135 | 0.0150 | 0.0158 | 0.0166 | 0.0169 | 0.0171 |
+| 0.20 | 0.0120 | 0.0135 | 0.0143 | 0.0151 | 0.0155 | 0.0157 |
+| 0.30 | 0.0105 | 0.0119 | 0.0127 | 0.0135 | 0.0139 | 0.0141 |
+| 0.40 | 0.0087 | 0.0102 | 0.0110 | 0.0118 | 0.0122 | 0.0123 |
+| 0.50 | 0.0064 | 0.0079 | 0.0088 | 0.0095 | 0.0099 | 0.0101 |
+
+Share of eval queries inside the band:
+
+| L \ U | 0.80 | 0.90 | 0.95 | 0.98 | 0.99 | 0.995 |
+|---|---|---|---|---|---|---|
+| 0.02 | 0.098 | 0.109 | 0.122 | 0.144 | 0.164 | 0.190 |
+| 0.05 | 0.076 | 0.087 | 0.100 | 0.122 | 0.142 | 0.168 |
+| 0.10 | 0.061 | 0.072 | 0.085 | 0.107 | 0.127 | 0.153 |
+| 0.20 | 0.046 | 0.057 | 0.070 | 0.092 | 0.112 | 0.138 |
+| 0.30 | 0.036 | 0.047 | 0.060 | 0.082 | 0.102 | 0.127 |
+| 0.40 | 0.027 | 0.039 | 0.052 | 0.073 | 0.094 | 0.119 |
+| 0.50 | 0.020 | 0.031 | 0.044 | 0.066 | 0.086 | 0.111 |
+
+**Stage 2 setup:** band pairs B 1,036,929 (207,408 queries); eval 436,481 (87,301 queries). Best rounds: control 1145, Damerau-Levenshtein 1567, Monge-Elkan 1813, Soft TF-IDF 1146, cross-encoder 967.
+
+**All results (REPORT half, 15,000 entities; ΔF0.5 vs stage 1 with 95% bootstrap CI):**
+
+| Method (pick) | L | U | τ₂ | Band | F0.5 | P | R | ΔF0.5 |
+|---|---|---|---|---|---|---|---|---|
+| Stage 1 only | | | | | 0.9712 | 0.9894 | 0.9433 | |
+| **Cross-encoder (best F0.5)** | 0.02 | 0.995 | 0.7 | 0.190 | **0.9818** | **0.9956** | 0.9567 | **+0.0105** [+0.0093, +0.0118] |
+| **Cross-encoder (recall at P)** | 0.02 | 0.95 | 0.4 | 0.122 | 0.9793 | 0.9890 | **0.9652** | +0.0081 [+0.0067, +0.0093] |
+| Control (best F0.5) | 0.2 | 0.8 | 0.7 | 0.046 | 0.9724 | 0.9923 | 0.9403 | +0.0012 [+0.0005, +0.0020] |
+| Control (recall at P) | 0.5 | 0.8 | 0.55 | 0.020 | 0.9717 | 0.9886 | 0.9462 | +0.0005 [−0.0001, +0.0011] |
+| Damerau-Lev. (best F0.5) | 0.5 | 0.9 | 0.65 | 0.031 | 0.9724 | 0.9917 | 0.9420 | +0.0012 [+0.0004, +0.0019] |
+| Damerau-Lev. (recall at P) | 0.3 | 0.9 | 0.55 | 0.047 | 0.9718 | 0.9880 | 0.9483 | +0.0005 [−0.0003, +0.0014] |
+| Monge-Elkan (best F0.5) | 0.3 | 0.9 | 0.65 | 0.047 | 0.9734 | 0.9920 | 0.9439 | +0.0022 [+0.0013, +0.0030] |
+| Monge-Elkan (recall at P) | 0.02 | 0.8 | 0.55 | 0.098 | 0.9723 | 0.9879 | 0.9500 | +0.0011 [+0.0002, +0.0020] |
+| Soft TF-IDF (best F0.5) | 0.5 | 0.9 | 0.7 | 0.031 | 0.9724 | 0.9929 | 0.9394 | +0.0012 [+0.0004, +0.0019] |
+| Soft TF-IDF (recall at P) | 0.5 | 0.8 | 0.5 | 0.020 | 0.9716 | 0.9878 | 0.9474 | +0.0004 [−0.0003, +0.0010] |
+
+**Cross-encoder setup:** MiniLM-L6 (`ms-marco-MiniLM-L-6-v2`), 2-fold cross-fitted, 300,000 training pairs per fold (4,688 steps), CUDA PyTorch 2.13.0. Run time 840s. Stage-2 feature importance: stage-1 probability 1107, cross-encoder score 665, `p1_rank` 223, `p1_gap` 24.
+
+**Timing:** feature build for A, B and eval took 271s; stage-1 training finished at 371s; the four classical methods ended at 685s.
+
+## 6. False-negative analysis (best cascade, TUNE half)
+
+2,223 of 51,781 true links were missed (4.29%).
+
+| Cause | Count | Share |
+|---|---|---|
+| Uncertain query, stage 2 said no | 1,003 | 45.1% |
+| True entity never retrieved by blocking | 897 | 40.4% |
+| True entity at rank 10 to 21 | 158 | 7.1% |
+| Assigned to the wrong entity | 63 | 2.8% |
+| Probability below L | 63 | 2.8% |
+| True entity not in stage-1 top 5 | 39 | 1.8% |
+
+| Profile | Missed | All true queries |
+|---|---|---|
+| Empty address | 53.6% | 4.3% |
+| From Source 3 | 52.5% | 51.9% |
+| India | 44.0% | 39.9% |
+| Name length (chars) | 15.7 | 16.2 |
+
+## 7. v3 study: recall upgrade (`study_v3.py`)
+
+Same split, eval entities and metric as section 5 (samples A and B of 1,000,000 queries each; TUNE and REPORT halves of 15,000 entities each), so every number compares directly. That is 2.4M of the 10.3M training queries; the search index is all 2.2M S1 records. Total run time about 1 h 50 min: dense channel 18 min, candidates 24, features 11, stage 1 8, ablation 8, stage 2 34, decisions 4.
+
+**What changed**
+
+- Candidates: the full v2 union (no rank < 10 cut) plus four new searches: a fine-tuned MiniLM bi-encoder on 'name | address' (dense; top 10, top 30 for empty addresses), a name search with relaxed frequency pruning for empty addresses (top 50), fuzzy name keys (OCR-confusion folding such as 0/o, 1/l, 5/s, 8/b and i/l, 1-deletion variants, unordered token pairs, metaphone codes) with address char 4-grams (top 10, top 30 for empty addresses), and an order-free name-key block re-ranked by address similarity. 32.9 candidates per query (was about 10).
+- Stage 1: 15 new features (name-ambiguity counts, name-space rank and margin, dense and fuzzy cosines, extra search flags); 60 in total.
+- Stage 2: cross-encoder on the stage-1 top 8 (was 5), 600,000 training pairs per fold (was 300,000) with empty-address queries up-weighted x3, rival features (cross-encoder rank, gap, margin, softmax) and sibling features (other queries whose top candidate is the same S1).
+- Decisions: global thresholds; separate thresholds for empty and non-empty addresses; expected-F0.5 assignment per S1 entity.
+
+**Bi-encoder:** 400,000 training queries whose S1 entity is not used by A, B or eval (3,125 steps). On its own it retrieves 0.9881 of the study true links (v2 union of three searches: 0.9825).
+
+**Blocking recall (51,781 TUNE true links):**
+
+| | v2, rank < 10 | v2, all ranks | v3 |
+|---|---|---|---|
+| All | 0.9796 | 0.9827 | 0.9968 |
+| Empty address (2,235) | 0.7736 | 0.7933 | 0.9530 |
+| Non-empty address (49,546) | 0.9889 | 0.9912 | 0.9987 |
+
+Found only by one new search: dense 0.55%, wide 0.09%, fuzzy 0.04%, name key 0%.
+
+Empty-address links retrieved, by number of S1 records sharing the true name (v2, all ranks -> v3): 1: 0.932 -> 0.989; 2: 0.892 -> 0.968; 3-4: 0.916 -> 0.986; 5-9: 0.881 -> 0.951; 10-49: 0.503 -> 0.943; 50+: 0.163 -> 0.775.
+
+**Stage 1 (REPORT half):**
+
+| | F0.5 | Precision | Recall |
+|---|---|---|---|
+| Section 5 stage 1 | 0.9712 | 0.9894 | 0.9433 |
+| v3 candidates, the old 45 features | 0.9730 | 0.9902 | 0.9463 |
+| v3 candidates, 60 features | 0.9779 | 0.9916 | 0.9558 |
+
+31,100,238 training pairs; best round 894; tau1 = 0.61. Top features by gain: `dense_margin` 6569, `num_jac` 1070, `margin` 460, `a_tset` 267, `q_is_domain` 256. Stage-2 ceiling (perfect stage 2 on the band, top 8): TUNE F0.5 0.9969 (section 5: 0.9917).
+
+**Final systems (REPORT half; dF0.5 vs the section 5 cross-encoder cascade, 95% paired bootstrap CI):**
+
+| System | TUNE F0.5 | F0.5 | P | R | Empty-address link recall | Non-empty link recall | dF0.5 |
+|---|---|---|---|---|---|---|---|
+| Section 5 cross-encoder cascade | 0.9818 | 0.9818 | 0.9956 | 0.9567 | 0.481 | 0.9798 | |
+| v3 stage 1 only | 0.9787 | 0.9779 | 0.9916 | 0.9558 | 0.545 | 0.9768 | -0.0039 [-0.0052, -0.0026] |
+| v3 cascade, no sibling features | 0.9868 | 0.9874 | 0.9972 | 0.9687 | 0.545 | 0.9897 | +0.0056 [+0.0048, +0.0066] |
+| **v3 cascade, global thresholds** | 0.9871 | **0.9876** | 0.9971 | **0.9695** | **0.549** | 0.9904 | **+0.0058 [+0.0049, +0.0068]** |
+| v3 cascade, empty / non-empty thresholds | 0.9873 | 0.9875 | 0.9973 | 0.9686 | 0.533 | 0.9904 | +0.0057 [+0.0048, +0.0067] |
+| v3 expected-F0.5 assignment | 0.9871 | 0.9875 | 0.9971 | 0.9680 | 0.518 | 0.9897 | +0.0057 [+0.0048, +0.0068] |
+
+Picks: global L = 0.02, U = 0.995, tau2 = 0.7; separate thresholds chose L = 0.02, U = 0.95, tau2 = 0.8 for empty addresses and the global values otherwise; expected-F chose gamma = 1.0, gamma for empty addresses = 2.0, m0 = 0.1. Stage-2 dev logloss 0.0288 with sibling features, 0.0305 without. Band pairs: B 1,579,648 (197,456 queries), eval 670,056 (83,757 queries). Eval band AUC: stage 1 0.9933, cross-encoder 0.9901, stage 2 0.9974.
+
+**False negatives (v3 cascade with global thresholds, TUNE half):** 1,559 of 51,781 (3.01%; section 6: 2,223, 4.29%).
+
+| Cause | Count | Share |
+|---|---|---|
+| Band query, stage 2 said no | 1,064 | 68.2% |
+| True entity outside the stage-1 top 8 | 247 | 15.8% |
+| Never retrieved by blocking | 167 | 10.7% |
+| Assigned to the wrong entity | 52 | 3.3% |
+| Stage-1 probability below 0.5 | 29 | 1.9% |
+
+Empty addresses are 67.7% of the misses (4.3% of true links). Recall of empty-address links by number of S1 records sharing the true name: 1: 0.898 (section 5: 0.831); 2: 0.300 (0.188); 3-4: 0.116 (0.060); 5-9: 0.112 (0.014); 10-49: 0.019 (0.000); 50+: 0.000 (0.000). Non-empty links: 0.987-0.991 in every bucket.
+
+Misses by type on the REPORT half (v3 global vs section 5): empty address with a name shared by 2+ S1 records 939 (was 1,020), empty address with a unique name 136 (was 217), non-empty address 473 (was 999).
+
+## Not done yet
+
+- v2 test-set blocking, v2 test-time prediction and the cascade on test.
+- The v3 pipeline on test: the extra searches, features, stage 1 and stage 2 have only run on the study sample of train.
+- Any v2 or v3 submission. Only the v1 files exist.
+- Any leaderboard score, since you haven't shared one.
